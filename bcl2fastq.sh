@@ -55,7 +55,7 @@ echo -e "[     INFO    ] Input Run Directory  : ${INPUT}"
 echo -e "[     INFO    ] Fastq Output Directory : ${OUTPUT}/$(basename "${INPUT}")"
 echo -e "[     INFO    ] Sample Sheet : ${SAMPLESHEET}"
 echo -e "[     INFO    ] Threads = ${THREADS}"
-echo -e "[     INFO    ] Emails = ${EMAIL}"
+echo -e "[     INFO    ] Emails = ${EMAIL}\n"
 ## -----------------------------------------------------------------------------
 
 ## Print start date/time

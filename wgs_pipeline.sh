@@ -1,12 +1,11 @@
 #!/bin/bash
 
-### Human Whole Genome Sequencing Data Analysis Pipeline (HWGS-PIPLINE)
-### Version 1.0 (Sep 12, 2021)
-### Copyright 2021 Usama Bakry and Ahmed ElHossieny
+SCRIPT="Human Whole Genome Sequencing Data Analysis Pipeline (HWGS-PIPLINE) - v1.1 (Dec 26, 2021)"
+AUTHOR="Copyright 2021 Usama Bakry (u.bakry@icloud.com)"
 
 ## Command line options
 ## -----------------------------------------------------------------------------
-while getopts f:r:o:s:R:t: OPTION
+while getopts f:r:o:s:R:t:e: OPTION
 do
 case "${OPTION}"
 in
@@ -22,6 +21,8 @@ s) SAMPLE_NAME=${OPTARG};;
 R) REF=${OPTARG};;
 # Threads
 t) THREADS=${OPTARG};;
+# Email
+e) EMAIL=${OPTARG};;
 esac
 done
 ## -----------------------------------------------------------------------------
@@ -32,6 +33,7 @@ echo -e "[     INFO    ] R1 Fastq File  : ${R1}"
 echo -e "[     INFO    ] R2 Fastq File  : ${R2}"
 echo -e "[     INFO    ] Output Directory : ${OUTPUT}"
 echo -e "[     INFO    ] Threads = ${THREADS}"
+echo -e "[     INFO    ] Emails = ${EMAIL}"
 ## -----------------------------------------------------------------------------
 
 ## User confirmation
@@ -40,13 +42,12 @@ read -p "Continue (y/n)?" CHOICE
 case "$CHOICE" in 
 	y|Y ) 
 
-time {
+main () {
 
 ## Print pipeline info
 ## -----------------------------------------------------------------------------                     
-echo -e "[     INFO    ] Human Whole Genome Sequencing Data Analysis Pipeline (HWGS-PIPLINE)"
-echo -e "[     INFO    ] Version 1.0 (Sep 12, 2021)"
-echo -e "[     INFO    ] Copyright 2021 Usama Bakry and Ahmed ElHossieny\n"
+echo -e "[     INFO    ] ${SCRIPT}"
+echo -e "[     INFO    ] ${AUTHOR}"
 ## -----------------------------------------------------------------------------  
 
 ## Print user args
@@ -54,12 +55,13 @@ echo -e "[     INFO    ] Copyright 2021 Usama Bakry and Ahmed ElHossieny\n"
 echo -e "[     INFO    ] R1 Fastq File  : ${R1}"
 echo -e "[     INFO    ] R2 Fastq File  : ${R2}"
 echo -e "[     INFO    ] Output Directory : ${OUTPUT}"
-echo -e "[     INFO    ] Threads = ${THREADS}\n"
+echo -e "[     INFO    ] Threads = ${THREADS}"
+echo -e "[     INFO    ] Emails = ${EMAIL}\n"
 ## -----------------------------------------------------------------------------
 
 ## Print start date/time
 ## -----------------------------------------------------------------------------                     
-echo -e "[    START    ] Starting date/time  : $(date)\n"
+echo -e "[    START    ] $(date)\n"
 ## -----------------------------------------------------------------------------  
 
 ## Create output directory
@@ -109,6 +111,9 @@ echo -e "[   PROCESS   ] Mapping against reference genome..."
 M_DIR=${OUTPUT}/02_Mapping/
 mkdir -p $M_DIR
 
+CHRS_DIR=${M_DIR}/Chrs/
+mkdir -p $CHRS_DIR
+
 # Index reference genome
 #bwa index $REF
 
@@ -126,6 +131,10 @@ samtools view -bS \
 samtools sort -o ${M_DIR}/${SAMPLE_NAME}.sorted.bam \
     --threads $THREADS
 
+# Split BAM file and move files to Chrs directory
+bamtools split -in ${M_DIR}/${SAMPLE_NAME}.sorted.bam -reference
+mv ${M_DIR}/*.REF_chr*.bam ${CHRS_DIR}
+
 echo -e "[      OK     ] Mapping is done.\n"
 }
 ## -----------------------------------------------------------------------------
@@ -135,27 +144,48 @@ echo -e "[      OK     ] Mapping is done.\n"
 time {
 echo -e "[   PROCESS   ] Variant calling..."
 
-# Create variant calling subfolder
+# Zipping and indexing required files
+# bgzip -c /SAN/DBs/UCSC_GRCh38/fasta/hg38_without_alt.fa > /SAN/DBs/UCSC_GRCh38/fasta/hg38_without_alt_bgzip.fa.gz
+# gatk CreateSequenceDictionary -R /SAN/DBs/UCSC_GRCh38/fasta/hg38_without_alt_bgzip.fa.gz
+# samtools faidx /SAN/DBs/UCSC_GRCh38/fasta/hg38_without_alt_bgzip.fa.gz
+
+# Create variant calling subfolders
 VC_DIR=${OUTPUT}/03_Variant_Calling/
 mkdir -p $VC_DIR
 
-# Zipping and indexing required files
-bgzip -c /data1/ref/UCSC_GRCh38/hg38.fa > /data1/ref/UCSC_GRCh38/hg38_bgzip.fa.gz
-gatk CreateSequenceDictionary -R /data1/ref/UCSC_GRCh38/hg38_bgzip.fa.gz
-samtools faidx /data1/ref/UCSC_GRCh38/hg38_bgzip.fa.gz
-samtools index ${M_DIR}/${SAMPLE_NAME}.sorted.bam
+GVCF_DIR=${VC_DIR}/GVCF/
+mkdir -p $GVCF_DIR
 
-# GATK command
-gatk --java-options "-Xmx400g" HaplotypeCaller  \
-   -R /data1/ref/UCSC_GRCh38/hg38_bgzip.fa.gz \
-   -I ${M_DIR}/${SAMPLE_NAME}.sorted.bam \
-   -O ${VC_DIR}/${SAMPLE_NAME}.g.vcf.gz \
-   -bamout ${VC_DIR}/${SAMPLE_NAME}.bam \
-   -ERC GVCF
-gatk --java-options "-Xmx400g" GenotypeGVCFs \
-   -R /data1/ref/UCSC_GRCh38/hg38_bgzip.fa.gz \
-   -V ${VC_DIR}/${SAMPLE_NAME}.g.vcf.gz \
-   -O ${VC_DIR}/${SAMPLE_NAME}.vcf.gz
+HAPLO_CMD=""
+CONVERT_CMD=""
+
+BAMS=$(ls ${CHRS_DIR})
+for BAM in $BAMS
+do
+    samtools index ${CHRS_DIR}/${BAM}
+
+    BNAME_WITHOUT=$(basename "${BAM}" | cut -d. -f1,2,3)
+    
+    # GATK command
+    HAPLO_CMD="${HAPLO_CMD} gatk --java-options \"-Xmx8g\" HaplotypeCaller -R /SAN/DBs/UCSC_GRCh38/fasta/hg38_without_alt_bgzip.fa.gz -I ${CHRS_DIR}/${BAM} -O ${VC_DIR}/${BNAME_WITHOUT}.g.vcf.gz -bamout ${VC_DIR}/${BNAME_WITHOUT}.bam -ERC GVCF &"
+    CONVERT_CMD="${CONVERT_CMD} gatk --java-options \"-Xmx8g\" GenotypeGVCFs -R /SAN/DBs/UCSC_GRCh38/fasta/hg38_without_alt_bgzip.fa.gz -V ${VC_DIR}/${BNAME_WITHOUT}.g.vcf.gz -O ${VC_DIR}/${BNAME_WITHOUT}.vcf.gz &"
+    
+done
+
+HAPLO_CMD="${HAPLO_CMD} wait && fg"
+CONVERT_CMD="${CONVERT_CMD} wait && fg"
+
+echo -e "${HAPLO_CMD}"
+echo -e "${CONVERT_CMD}"
+
+eval ${HAPLO_CMD}
+eval ${CONVERT_CMD}
+
+# Move GVCF files to GVCF folder
+mv ${VC_DIR}/*.g.vcf.gz* ${GVCF_DIR}
+
+# Concatenate VCF files to one VCF
+bcftools concat --output ${VC_DIR}/${SAMPLE_NAME}.vcf.gz --output-type z --threads $THREADS $(ls ${VC_DIR}/*.vcf.gz)
 
 echo -e "[      OK     ] Variant calling is done.\n"
 }
@@ -189,11 +219,45 @@ echo -e "[      OK     ] Annotation is done.\n"
 
 ## Print end date/time
 ## -----------------------------------------------------------------------------                     
-echo -e "[     END     ] Starting date/time  : $(date)\n"
+echo -e "[     END     ] $(date)\n"
 ## -----------------------------------------------------------------------------  
 
+} ## End of main function
+## -----------------------------------------------------------------------------                      
+
+## Prepare output log file
+## -----------------------------------------------------------------------------                     
+LOG=$( { time main > "$(dirname "${OUTPUT}")"/${SAMPLE_NAME}.log 2>&1; } 2>&1 )
+echo -e "Duration:${LOG}" >> "$(dirname "${OUTPUT}")"/${SAMPLE_NAME}.log 2>&1
+
+# mv "$(dirname "${OUTPUT}")"/bcl2fastq_output.log ${OUTPUT}/$(basename "${INPUT}")/
+## -----------------------------------------------------------------------------                     
+
+## Send email
+## -----------------------------------------------------------------------------
+echo -e "[   PROCESS   ] Sending email ..."
+
+# ssmtp command
+# ssmtp ${EMAIL} < ${OUTPUT}/bcl2fastq_output.log
+
+# mail command
+echo -e "[     INFO    ] ${SCRIPT}
+[     INFO    ] ${AUTHOR}
+                 
+[     INFO    ] R1 Fastq File  : ${R1}
+[     INFO    ] R2 Fastq File  : ${R2}
+[     INFO    ] Output Directory : ${OUTPUT}
+[     INFO    ] Threads = ${THREADS}
+[     INFO    ] Emails = ${EMAIL}
+
+Duration:${LOG}" | mail -s "$(basename "${SAMPLE_NAME}") - WGS Data Analysis" -aFrom:Bioinformatics\ Operations\<bioinfo.ops@gmail.com\> -A $(dirname "${OUTPUT}")/${SAMPLE_NAME}.log ${EMAIL}
+
+echo -e "[      OK     ] Email was sent.\n"
+
+## -----------------------------------------------------------------------------
+
+
 exit 0
-} > output.log 2>&1
 
 ;;
 
