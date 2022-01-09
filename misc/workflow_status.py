@@ -1,10 +1,3 @@
-"""
-Update Workflow Status Script 
-Copyright 2021 Usama Bakry (u.bakry@icloud.com)
-
-This file is used for updating workflow status in database.
-"""
-
 # Importing libraries
 import argparse
 from os import sep
@@ -12,7 +5,10 @@ import sys
 from datetime import datetime
 import pandas as pd
 import pymysql
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine 
+
+SCRIPT = "Update Workflow Status Script - v1.1 (Jan 05, 2022)"
+AUTHOR = "Copyright 2022 Usama Bakry (u.bakry@icloud.com)"
 
 args = None
 time_fmt = '%H:%M:%S'
@@ -24,7 +20,7 @@ def get_args():
 	get_args() function creates required and optional arguments and returns a copy of the argument list to be used within the script.
 	"""
     parser = argparse.ArgumentParser(
-        description="This script is used for updating workflow status in database.",
+        description=SCRIPT+" | This script is used for updating workflow status in database | "+AUTHOR,
         epilog="This is where you might put example usage"
         )
 

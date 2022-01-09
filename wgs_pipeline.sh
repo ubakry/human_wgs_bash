@@ -1,24 +1,28 @@
 #!/bin/bash
 
-SCRIPT="Human Whole Genome Sequencing Data Analysis Pipeline (HWGS-PIPLINE) - v1.1 (Dec 26, 2021)"
-AUTHOR="Copyright 2021 Usama Bakry (u.bakry@icloud.com)"
+SCRIPT="Human Whole Genome Sequencing Data Analysis Pipeline (HWGS-PIPLINE) - v1.2 (Jan 05, 2022)"
+AUTHOR="Copyright 2022 Usama Bakry (u.bakry@icloud.com)"
 
 ## Command line options
 ## -----------------------------------------------------------------------------
-while getopts f:r:o:s:R:t:e: OPTION
+while getopts F:R:o:s:r:p:g:t:e: OPTION
 do
 case "${OPTION}"
 in
 # Forward fastq file
-f) R1=${OPTARG};;
+F) R1=${OPTARG};;
 # Reverse fastq file
-r) R2=${OPTARG};;
+R) R2=${OPTARG};;
 # Output directory
 o) OUTPUT=${OPTARG};;
 # sample name
 s) SAMPLE_NAME=${OPTARG};;
-# reference fasta file
-R) REF=${OPTARG};;
+# run name
+r) RUN=${OPTARG};;
+# project name
+p) PROJECT=${OPTARG};;
+# reference genome fasta file
+g) REF=${OPTARG};;
 # Threads
 t) THREADS=${OPTARG};;
 # Email
@@ -32,6 +36,9 @@ done
 echo -e "[     INFO    ] R1 Fastq File  : ${R1}"
 echo -e "[     INFO    ] R2 Fastq File  : ${R2}"
 echo -e "[     INFO    ] Output Directory : ${OUTPUT}"
+echo -e "[     INFO    ] Sample : ${SAMPLE_NAME}"
+echo -e "[     INFO    ] Run : ${RUN}"
+echo -e "[     INFO    ] Project : ${PROJECT}"
 echo -e "[     INFO    ] Threads = ${THREADS}"
 echo -e "[     INFO    ] Emails = ${EMAIL}"
 ## -----------------------------------------------------------------------------
@@ -55,6 +62,9 @@ echo -e "[     INFO    ] ${AUTHOR}"
 echo -e "[     INFO    ] R1 Fastq File  : ${R1}"
 echo -e "[     INFO    ] R2 Fastq File  : ${R2}"
 echo -e "[     INFO    ] Output Directory : ${OUTPUT}"
+echo -e "[     INFO    ] Sample : ${SAMPLE_NAME}"
+echo -e "[     INFO    ] Run : ${RUN}"
+echo -e "[     INFO    ] Project : ${PROJECT}"
 echo -e "[     INFO    ] Threads = ${THREADS}"
 echo -e "[     INFO    ] Emails = ${EMAIL}\n"
 ## -----------------------------------------------------------------------------
@@ -69,15 +79,15 @@ echo -e "[    START    ] $(date)\n"
 echo -e "[   PROCESS   ] Creating output directory..."
 
 # Check if output directory is exist
-if [ -d "${OUTPUT}" ] 
+if [ -d "${OUTPUT}/${SAMPLE_NAME}/" ] 
 then
     echo -e "[    ERROR    ] The output directory already exists.\n"
     exit 0
 else
-    mkdir -p $OUTPUT/
+    mkdir -p ${OUTPUT}/${SAMPLE_NAME}/
 fi
 
-echo -e "[      OK     ] Output directory is ready on ${OUTPUT}\n"
+echo -e "[      OK     ] Output directory is ready on ${OUTPUT}/${SAMPLE_NAME}/\n"
 ## ----------------------------------------------------------------------------- 
 
 ## Quality control using fastp
@@ -85,8 +95,11 @@ echo -e "[      OK     ] Output directory is ready on ${OUTPUT}\n"
 time {
 echo -e "[   PROCESS   ] Applying quality control..."
 
+# Update database
+python3 ${PWD}/misc/workflow_status.py -p "${PROJECT}" -r "${RUN}" -s "${SAMPLE_NAME}" --convert "Done" --qc "In Progress"
+
 # Create qc subfolder
-QC_DIR=${OUTPUT}/01_QC/
+QC_DIR=${OUTPUT}/${SAMPLE_NAME}/01_QC/
 mkdir -p $QC_DIR
 
 # Fastp command
@@ -98,6 +111,9 @@ fastp -i $R1 \
     -h ${QC_DIR}/${SAMPLE_NAME}.html \
     --thread $THREADS
 
+# Update database
+python3 ${PWD}/misc/workflow_status.py -p "${PROJECT}" -r "${RUN}" -s "${SAMPLE_NAME}" --convert "Done" --qc "Done"
+
 echo -e "[      OK     ] QC is done.\n"
 }
 ## -----------------------------------------------------------------------------
@@ -107,8 +123,11 @@ echo -e "[      OK     ] QC is done.\n"
 time {
 echo -e "[   PROCESS   ] Mapping against reference genome..."
 
+# Update database
+python3 ${PWD}/misc/workflow_status.py -p "${PROJECT}" -r "${RUN}" -s "${SAMPLE_NAME}" --convert "Done" --qc "Done" --alignment "In Progress"
+
 # Create mapping subfolder
-M_DIR=${OUTPUT}/02_Mapping/
+M_DIR=${OUTPUT}/${SAMPLE_NAME}/02_Mapping/
 mkdir -p $M_DIR
 
 CHRS_DIR=${M_DIR}/Chrs/
@@ -135,6 +154,9 @@ samtools sort -o ${M_DIR}/${SAMPLE_NAME}.sorted.bam \
 bamtools split -in ${M_DIR}/${SAMPLE_NAME}.sorted.bam -reference
 mv ${M_DIR}/*.REF_chr*.bam ${CHRS_DIR}
 
+# Update database
+python3 ${PWD}/misc/workflow_status.py -p "${PROJECT}" -r "${RUN}" -s "${SAMPLE_NAME}" --convert "Done" --qc "Done" --alignment "Done"
+
 echo -e "[      OK     ] Mapping is done.\n"
 }
 ## -----------------------------------------------------------------------------
@@ -144,13 +166,16 @@ echo -e "[      OK     ] Mapping is done.\n"
 time {
 echo -e "[   PROCESS   ] Variant calling..."
 
+# Update database
+python3 ${PWD}/misc/workflow_status.py -p "${PROJECT}" -r "${RUN}" -s "${SAMPLE_NAME}" --convert "Done" --qc "Done" --alignment "Done" --mark_duplicates "In Progress" --variant_calling "In Progress"
+
 # Zipping and indexing required files
 # bgzip -c /SAN/DBs/UCSC_GRCh38/fasta/hg38_without_alt.fa > /SAN/DBs/UCSC_GRCh38/fasta/hg38_without_alt_bgzip.fa.gz
 # gatk CreateSequenceDictionary -R /SAN/DBs/UCSC_GRCh38/fasta/hg38_without_alt_bgzip.fa.gz
 # samtools faidx /SAN/DBs/UCSC_GRCh38/fasta/hg38_without_alt_bgzip.fa.gz
 
 # Create variant calling subfolders
-VC_DIR=${OUTPUT}/03_Variant_Calling/
+VC_DIR=${OUTPUT}/${SAMPLE_NAME}/03_Variant_Calling/
 mkdir -p $VC_DIR
 
 GVCF_DIR=${VC_DIR}/GVCF/
@@ -187,6 +212,9 @@ mv ${VC_DIR}/*.g.vcf.gz* ${GVCF_DIR}
 # Concatenate VCF files to one VCF
 bcftools concat --output ${VC_DIR}/${SAMPLE_NAME}.vcf.gz --output-type z --threads $THREADS $(ls ${VC_DIR}/*.vcf.gz)
 
+# Update database
+python3 ${PWD}/misc/workflow_status.py -p "${PROJECT}" -r "${RUN}" -s "${SAMPLE_NAME}" --convert "Done" --qc "Done" --alignment "Done" --mark_duplicates "Done" --variant_calling "Done"
+
 echo -e "[      OK     ] Variant calling is done.\n"
 }
 ## -----------------------------------------------------------------------------
@@ -196,8 +224,11 @@ echo -e "[      OK     ] Variant calling is done.\n"
 time {
 echo -e "[   PROCESS   ] Variants annotation..."
 
+# Update database
+python3 ${PWD}/misc/workflow_status.py -p "${PROJECT}" -r "${RUN}" -s "${SAMPLE_NAME}" --convert "Done" --qc "Done" --alignment "Done" --mark_duplicates "Done" --variant_calling "Done" --annotation "In Progress"
+
 # Create annotation subfolder
-VA_DIR=${OUTPUT}/04_Annotation/
+VA_DIR=${OUTPUT}/${SAMPLE_NAME}/04_Annotation/
 mkdir -p $VA_DIR
 
 # Unzip the vcf file
@@ -212,6 +243,9 @@ vep --input_file ${VC_DIR}/${SAMPLE_NAME}.vcf \
     --everything \
     --verbose \
     --force_overwrite
+
+# Update database
+python3 ${PWD}/misc/workflow_status.py -p "${PROJECT}" -r "${RUN}" -s "${SAMPLE_NAME}" --convert "Done" --qc "Done" --alignment "Done" --mark_duplicates "Done" --variant_calling "Done" --annotation "Done" --prs_calculations "Done" --report_generation "Done"
 
 echo -e "[      OK     ] Annotation is done.\n"
 }
@@ -247,6 +281,9 @@ echo -e "[     INFO    ] ${SCRIPT}
 [     INFO    ] R1 Fastq File  : ${R1}
 [     INFO    ] R2 Fastq File  : ${R2}
 [     INFO    ] Output Directory : ${OUTPUT}
+[     INFO    ] Sample : ${SAMPLE_NAME}
+[     INFO    ] Run : ${RUN}
+[     INFO    ] Project : ${PROJECT}
 [     INFO    ] Threads = ${THREADS}
 [     INFO    ] Emails = ${EMAIL}
 
